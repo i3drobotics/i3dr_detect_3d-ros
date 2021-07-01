@@ -1,20 +1,4 @@
-#include <ros/ros.h>
-#include <ros/console.h>
-#include <ros/param.h>
-
-#include <image_transport/image_transport.h>
-
-#include <sensor_msgs/CameraInfo.h>
-#include <sensor_msgs/Image.h>
-
-#include <boost/filesystem.hpp>
-
-#include <cv_bridge/cv_bridge.h>
-#include <opencv2/core/core.hpp>
-#include <opencv/cv.hpp>
-
-#include <halconcpp/HalconCpp.h>
-#include <hdevengine/HDevEngineCpp.h>
+#include "detect.h"
 
 using namespace HalconCpp;
 using namespace HDevEngineCpp;
@@ -25,53 +9,125 @@ struct halcon_variable
     std::vector<std::string> data;
 };
 
-std::string halcon_script_filepath = "/home/i3drwl001/catkin_ws/src/i3dr_halcon_object_detect-ros/hdev/primitive_detection.hdev";
+ros::Publisher point_cloud_pub_;
 
-bool detect()
+// read PLY point cloud from file using PCL
+pcl::PointCloud<pcl::PointXYZ>::Ptr read_pcl_from_file(std::string point_cloud_filepath){
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::io::loadPLYFile(point_cloud_filepath, *cloud);
+    return cloud;
+}
+
+void publish_sample_point_cloud(std::string sample_point_cloud_filepath){
+    pcl::PointCloud<pcl::PointXYZ>::Ptr sample_pcl = read_pcl_from_file(sample_point_cloud_filepath);
+    
+    sensor_msgs::PointCloud2 pcl2_msg;
+    pcl::toROSMsg(*sample_pcl, pcl2_msg);
+
+    //pcl2_msg.header = header;
+    pcl2_msg.height = 1;
+    pcl2_msg.width = sample_pcl->size();
+    pcl2_msg.is_bigendian = false;
+    pcl2_msg.is_dense = false; // there may be invalid points
+
+    //Publish ROS msg
+    point_cloud_pub_.publish(pcl2_msg);
+    ROS_INFO("Published sample point cloud");
+}
+
+void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
-    try
-    {
-        HDevEngine hdev_engine;
-        HDevProgram hdev_detection_program;
+    using namespace halcon_bridge;
+    using namespace HalconCpp;
 
-        try
-        {
-            hdev_detection_program.LoadProgram(halcon_script_filepath.c_str());
-        }
-        catch (HDevEngineException &hdev_exception)
-        {
-            std::stringstream error_ss;
-            error_ss << "Problem loading halcon script" << std::endl;
-            error_ss << hdev_exception.Message();
-            ROS_ERROR("%s", error_ss.str().c_str());
-            return false;
-        }
+    ROS_INFO("Converting point cloud to Halcon.");
 
-        std::string point_cloud_filepath = "/home/i3drwl001/catkin_ws/data/point_clouds/ball001.ply";
+    auto halcon_ptr = toHalconCopy(cloud_msg);
+    HObjectModel3D scene = *halcon_ptr->model;
 
-        HTuple hVarGlobalInputPointCloudFilepath;
-        hVarGlobalInputPointCloudFilepath[0] = point_cloud_filepath.c_str();
-
-        hdev_engine.SetGlobalCtrlVarTuple("GlobalInputPointCloudFilepath", hVarGlobalInputPointCloudFilepath);
-
-        HDevProgramCall hdev_detection_program_call = hdev_detection_program.Execute();
-
-        HTuple hVarGlobalOutputObjectPosition;
-        hVarGlobalOutputObjectPosition = hdev_engine.GetGlobalCtrlVarTuple("GlobalOutputObjectPosition");
-        double x = hVarGlobalOutputObjectPosition[0].D();
-        double y = hVarGlobalOutputObjectPosition[1].D();
-        double z = hVarGlobalOutputObjectPosition[2].D();
-        std::cout << x << ", " << y << ", " << z <<  std::endl;
-
-        return true;
+    HObjectModel3D plane_fit;
+    try{
+        plane_fit = scene.FitPrimitivesObjectModel3d("primitive_type", "plane");
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
     }
-    catch (HDevEngineException &hdev_exception)
-    {
-        std::stringstream error_ss;
-        error_ss << "Problem in halcon during detection" << std::endl;
-        error_ss << hdev_exception.Message();
-        ROS_ERROR("%s", error_ss.str().c_str());
-        return false;
+
+    HTuple plane_pose_tuple;
+    try{
+        plane_pose_tuple = plane_fit.GetObjectModel3dParams("primitive_parameter_pose");
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HPose plane_pose;
+    HObjectModel3D plane_object;
+    try{
+        plane_pose = HPose(plane_pose_tuple);
+        plane_object.GenPlaneObjectModel3d(plane_pose, HTuple(), HTuple());
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HPose empty_pose;
+    HTuple plane_distance;
+    try{
+        double max_plane_distance = 0.0;
+        scene.DistanceObjectModel3d(plane_object, HPose(), max_plane_distance, "distance_to", "primitive");
+        plane_distance = scene.GetObjectModel3dParams("&distance");
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HTuple plane_min;
+    HTuple plane_max;
+    try{
+        plane_min = plane_distance.TupleMin();
+        plane_max = plane_distance.TupleMax();
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HObjectModel3D scene_thresholded;
+    try{
+        scene_thresholded = scene.SelectPointsObjectModel3d("&distance", plane_min, plane_max);
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HObjectModel3DArray connected_objects;
+    try{
+        connected_objects = scene_thresholded.ConnectionObjectModel3d("distance_3d", 0.01);
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    HObjectModel3DArray selected_objects;
+    try{
+        selected_objects = scene.SelectObjectModel3d(connected_objects, "num_points", "and", 1000, 500000);
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
+    }
+
+    try{
+        for(int i = 0; i < selected_objects.Length(); i++){
+            HObjectModel3D primitive_fit = selected_objects.Tools()[i].FitPrimitivesObjectModel3d("primitive_type", "all");
+            HTuple primitive_pose = primitive_fit.GetObjectModel3dParams("center");
+            double x = primitive_pose[0];
+            double y = primitive_pose[1];
+            double z = primitive_pose[2];
+            std::cout << x << ", " << y << ", " << z <<  std::endl;
+        }
+    } catch (HOperatorException &e){
+        ROS_ERROR("Halcon error: %s, line: %d, file: %s", e.ErrorMessage().Text(), __LINE__, __FILE__);
+        return;
     }
 }
 
@@ -83,18 +139,19 @@ int main(int argc, char **argv)
 
     std::string ns = ros::this_node::getNamespace();
 
-    //Check halcon script exists
-    if (!boost::filesystem::exists(halcon_script_filepath))
+    std::string point_cloud_filepath = "data/point_clouds/ball001.ply";
+
+    point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2", 1);
+
+    ros::Subscriber sub = nh.subscribe("points2", 1, pointcloud_detect_callback);
+    
+    ros::Rate loop_rate(10);
+    while (ros::ok())
     {
-        ROS_ERROR("Failed to find halcon script for detection at: %s", halcon_script_filepath.c_str());
-        return 0;
+        publish_sample_point_cloud(point_cloud_filepath);
+        ros::spinOnce();
+        loop_rate.sleep();
     }
 
-    bool success = detect();
-    if (!success){
-        ROS_ERROR("Detection failed");
-        return 0;
-    }
-
-    //ros::spin();
+    return 0;
 }

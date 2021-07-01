@@ -12,23 +12,20 @@
 <c></c>
 <c>*** Global variables used for passing data in/out of script when working with ROS</c>
 <c>** Filepath to input point cloud</c>
-<l>global tuple GlobalInputPointCloudFilepath</l>
+<l>global object GlobalInputPointCloud</l>
 <l>global tuple GlobalOutputObjectPosition</l>
 <c></c>
 <c>*** Useful for locally testing detection uses files rather than variables</c>
 <l>localTesting := true</l>
 <l>testPointCloudFilepath := '../../../data/point_clouds/ball001.ply'</l>
 <c></c>
-<c>*** Define point cloud filepath</c>
 <l>if (localTesting)</l>
-<l>    pointCloudFilepath := testPointCloudFilepath</l>
+<c>    *** Step 1) Read in pointcloud from file</c>
+<l>    read_object_model_3d (testPointCloudFilepath, 'm', [], [], ObjectModel3D, Status)</l>
 <l>else</l>
-<l>    pointCloudFilepath := GlobalInputPointCloudFilepath</l>
+<c>    *** Step 1) Get point cloud from global tuples</c>
+<l>    ObjectModel3D := GlobalInputPointCloud</l>
 <l>endif</l>
-<c></c>
-<c>*** Step 1) Read in pointcloud</c>
-<c></c>
-<l>read_object_model_3d (pointCloudFilepath, 'm', [], [], ObjectModel3D, Status)</l>
 <c></c>
 <c>*** Step 2) Detects a plane in the pointcloud</c>
 <c></c>
