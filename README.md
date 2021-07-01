@@ -1,0 +1,1 @@
+# ROS package for object detection with Halcon
