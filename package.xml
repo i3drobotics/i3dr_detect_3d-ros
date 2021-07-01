@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+
+  <name>i3dr_halcon_object_detect</name>
+  <version>1.0.0</version>
+  <description>Object detection using halcon</description>
+  <author>Ben Knight</author>
+  <maintainer email="bknight@i3drobotics.com">Ben Knight</maintainer>
+  <license>BSD</license>
+  <url type="website">https://github.com/i3drobotics/i3dr_halcon_object_detect-ros</url>
+  
+  <buildtool_depend>catkin</buildtool_depend>  
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>opencv3</depend>
+  <depend>cv_bridge</depend>
+  
+</package>
+
+
