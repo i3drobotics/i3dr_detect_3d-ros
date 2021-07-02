@@ -10,6 +10,8 @@
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 
+#include <angles/angles.h>
+
 #include <boost/filesystem.hpp>
 
 #include <opencv2/core/core.hpp>

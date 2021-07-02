@@ -10,6 +10,7 @@ enum DetectionObjectType {
 
 // define global ros publishers
 ros::Publisher point_cloud_pub_;
+ros::Publisher point_cloud_plane_pub_;
 ros::Publisher point_cloud_segment_pub_;
 ros::Publisher detection_poses_pub_;
 ros::Publisher detection_object_pub_;
@@ -57,6 +58,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pcl::search::KdTree<PointT>::Ptr tree (new pcl::search::KdTree<PointT> ());
 
     // Create point cloud objects
+    pcl::PointCloud<PointT>::Ptr cloud_voxel_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<PointT>::Ptr cloud_passthrough_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals (new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud<PointT>::Ptr cloud_inlier_filtered (new pcl::PointCloud<PointT>);
@@ -86,12 +88,31 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     // Build a passthrough filter to remove spurious NaNs and scene background
     pass.setInputCloud (cloud);
     pass.setFilterFieldName ("z");
-    pass.setFilterLimits (0, 5);
+    pass.setFilterLimits (0, 3.0);
     pass.filter (*cloud_passthrough_filtered);
+
+    // Perform the actual filtering
+    double grid_size = 0.01;
+    pcl::VoxelGrid<PointT> sor;
+    sor.setInputCloud (cloud_passthrough_filtered);
+    sor.setLeafSize (grid_size, grid_size, grid_size);
+    sor.filter (*cloud_voxel_filtered);
+
+    if (cloud_voxel_filtered->points.empty ()){
+        ROS_ERROR("No points found in grid filtered point cloud");
+        return;
+    }
+
+    ROS_INFO("Detecting primitive on %lu points: ", cloud_voxel_filtered->points.size());
+
+    if (cloud_voxel_filtered->points.size () > 20000){
+        ROS_ERROR("Point cloud too large. Conside increasing voxel grid size.");
+        return;
+    }
 
     // Estimate point normals
     ne.setSearchMethod (tree);
-    ne.setInputCloud (cloud_passthrough_filtered);
+    ne.setInputCloud (cloud_voxel_filtered);
     ne.setKSearch (50);
     ne.compute (*cloud_normals);
 
@@ -102,15 +123,29 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     seg.setMethodType (pcl::SAC_RANSAC);
     seg.setMaxIterations (100);
     seg.setDistanceThreshold (0.03);
-    seg.setInputCloud (cloud_passthrough_filtered);
+    seg.setInputCloud (cloud_voxel_filtered);
     seg.setInputNormals (cloud_normals);
     // Obtain the plane inliers and coefficients
     seg.segment (*plane_inliers, *plane_coefficients);
 
+    if (plane_inliers->indices.size () == 0)
+    {
+        ROS_ERROR("No plane inliers found");
+        return;
+    }
+
     // Extract the planar inliers from the input cloud
-    extract.setInputCloud (cloud_passthrough_filtered);
+    extract.setInputCloud (cloud_voxel_filtered);
     extract.setIndices (plane_inliers);
     extract.setNegative (false);
+    pcl::PointCloud<PointT>::Ptr cloud_plane (new pcl::PointCloud<PointT> ());
+    extract.filter (*cloud_plane);
+    if (cloud_plane->points.empty ()){
+        ROS_ERROR("Plane object is empty");
+        return;
+    } else {
+        publish_point_cloud(point_cloud_plane_pub_, cloud_plane, cloud_msg->header.frame_id);
+    }
 
     // Remove the planar inliers, extract the rest
     extract.setNegative (true);
@@ -121,17 +156,49 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     extract_normals.filter (*cloud_normals2);
 
     // Create the segmentation object for sphere segmentation and set all the parameters
-    seg.setOptimizeCoefficients (true);
+    seg.setOptimizeCoefficients (false);
     seg.setModelType (sac_model);
     seg.setMethodType (pcl::SAC_RANSAC);
     seg.setNormalDistanceWeight (0.1);
-    seg.setMaxIterations (10000);
-    seg.setDistanceThreshold (0.05);
-    seg.setRadiusLimits (0, 0.1);
+    seg.setMaxIterations (5000);
+    seg.setDistanceThreshold (0.01);
+    seg.setRadiusLimits (0.0, 0.06);
     seg.setInputCloud (cloud_inlier_filtered);
     seg.setInputNormals (cloud_normals2);
     // Obtain the cylinder inliers and coefficients
     seg.segment (*seg_inliers, *seg_coefficients);
+
+    if (seg_coefficients->values[2] < 0){
+        ROS_ERROR(
+            "Invalid segmentation coefficients: (%.3f,%.3f,%.3f)",
+            seg_coefficients->values[0], seg_coefficients->values[1], seg_coefficients->values[2]
+        );
+        return;
+    }
+
+    if (seg_inliers->indices.size () == 0)
+    {
+        ROS_ERROR("No segmentation inliers found");
+        return;
+    }
+
+    // publish the segmented inliers to topic
+    extract.setInputCloud (cloud_inlier_filtered);
+    extract.setIndices (seg_inliers);
+    extract.setNegative (false);
+    pcl::PointCloud<PointT>::Ptr cloud_cylinder (new pcl::PointCloud<PointT> ());
+    extract.filter (*cloud_cylinder);
+    if (cloud_cylinder->points.empty ()){
+        ROS_ERROR("Segmented object is empty");
+        return;
+    } else {
+        publish_point_cloud(point_cloud_segment_pub_, cloud_cylinder, cloud_msg->header.frame_id);
+    }
+
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid(*cloud_cylinder, centroid);
+
+
     
     // Coefficents from RANSAC are different for each model type
     // (https://pointclouds.org/documentation/group__sample__consensus.html)
@@ -154,10 +221,17 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
             position[0] = seg_coefficients->values[0];
             position[1] = seg_coefficients->values[1];
             position[2] = seg_coefficients->values[2];
+            // position[0] = centroid[0];
+            // position[1] = centroid[1];
+            // position[2] = centroid[2];
             rotation[0] = seg_coefficients->values[3];
             rotation[1] = seg_coefficients->values[4];
             rotation[2] = seg_coefficients->values[5];
             rotation[3] = seg_coefficients->values[6];
+            // rotation[0] = 0;
+            // rotation[1] = 0;
+            // rotation[2] = 0;
+            // rotation[3] = 1.0;
             break;
         case DETECTION_OBJECT_SPHERE:
             // Extract position and rotation from coefficients for sphere model
@@ -165,6 +239,9 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
             position[0] = seg_coefficients->values[0];
             position[1] = seg_coefficients->values[1];
             position[2] = seg_coefficients->values[2];
+            // position[0] = centroid[0];
+            // position[1] = centroid[1];
+            // position[2] = centroid[2];
             rotation[0] = 0;
             rotation[1] = 0;
             rotation[2] = 0;
@@ -194,6 +271,13 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
 
     // Add rotation to object pose
     tf::Quaternion quat = tf::Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+    tf::Quaternion quat_offset;
+    quat_offset.setRPY(
+        angles::to_degrees(0),
+        angles::to_degrees(0),
+        angles::to_degrees(90)
+    );
+    quat *= quat_offset;
     quat.normalize();
     object_pose.pose.pose.orientation.w = quat[0];
     object_pose.pose.pose.orientation.x = quat[1];
@@ -214,7 +298,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     detection_marker_.header.stamp = ros::Time::now();
     detection_marker_.ns = recognized_objects_ns;
     detection_marker_.id = 0;
-    detection_marker_.type = visualization_msgs::Marker::MESH_RESOURCE;
+    detection_marker_.type = visualization_msgs::Marker::CYLINDER;
     detection_marker_.action = visualization_msgs::Marker::ADD;
 
     // Set colour to yellow
@@ -231,23 +315,11 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     detection_marker_.pose.orientation = object_pose.pose.pose.orientation;
     detection_marker_.pose.position = object_pose.pose.pose.position;
 
-    detection_marker_.text = detection_object_type_str;
+    //detection_marker_.text = detection_object_type_str;
 
     detection_object_pub_.publish(object);
     detection_poses_pub_.publish(object.pose);
     detection_marker_pub_.publish(detection_marker_);
-
-    // Write the cylinder inliers to disk
-    extract.setInputCloud (cloud_inlier_filtered);
-    extract.setIndices (seg_inliers);
-    extract.setNegative (false);
-    pcl::PointCloud<PointT>::Ptr cloud_cylinder (new pcl::PointCloud<PointT> ());
-    extract.filter (*cloud_cylinder);
-    if (cloud_cylinder->points.empty ()){
-        ROS_ERROR("Failed to segment object in point cloud.");
-    } else {
-        publish_point_cloud(point_cloud_segment_pub_, cloud_cylinder, cloud_msg->header.frame_id);
-    }
 }
 
 int main(int argc, char **argv)
@@ -258,10 +330,11 @@ int main(int argc, char **argv)
 
     std::string ns = ros::this_node::getNamespace();
 
-    detection_object_type_ = DETECTION_OBJECT_SPHERE;
+    detection_object_type_ = DETECTION_OBJECT_CYLINDER;
 
     point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2", 1);
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
+    point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
 
     detection_poses_pub_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped> ("pose", 1);
     detection_object_pub_ = nh.advertise<object_recognition_msgs::RecognizedObject> ("recognized_objects", 1);

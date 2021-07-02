@@ -7,15 +7,15 @@
     <arg name="titania_ns" default="i3dr_titania" />
 
     <!-- Reduce point cloud size with VoxelGrid -->
-    <node name="reduce_pcl" pkg="i3dr_detect_pcl_primitives" type="reduce_pcl" output="screen" >
-        <param name="grid_size" type="double" value="0.01" />
-        <remap from="/points2" to="$(arg titania_ns)/points2" /> <!-- Input point cloud topic -->
-        <remap from="/points2_reduced" to="$(arg titania_ns)/points2_reduced" /> <!-- Output point cloud topic -->
-    </node>
+    <!-- <node name="reduce_pcl" pkg="i3dr_detect_pcl_primitives" type="reduce_pcl" output="screen" >
+        <param name="grid_size" type="double" value="0.04" />
+        <remap from="/points2" to="$(arg titania_ns)/points2" /> 
+        <remap from="/points2_reduced" to="$(arg titania_ns)/points2_reduced" />
+    </node> -->
 
     <!-- Detect primitive in point cloud -->
     <node name="detect_pcl_primitives" pkg="i3dr_detect_pcl_primitives" type="detect_pcl_primitives" output="screen" >
-        <remap from="/points2" to="$(arg titania_ns)/points2_reduced" />
+        <remap from="/points2" to="$(arg titania_ns)/points2" />
     </node>
 
     <!-- DISPLAY -->
