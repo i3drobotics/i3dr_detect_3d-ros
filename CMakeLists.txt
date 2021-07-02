@@ -1,17 +1,13 @@
 cmake_minimum_required(VERSION 3.1)
-project(i3dr_halcon_object_detect)
+project(i3dr_detect_pcl_primitives)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-
-find_package(Halcon)
-if(NOT ${Halcon_FOUND})
-   message(FATAL_ERROR  "Skip processing ${PROJECT_NAME}, because HALCON library is missing!")
-   return()
-endif()
 
 find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	sensor_msgs
+	tf
+	object_recognition_msgs
     cv_bridge
 )
 
@@ -19,15 +15,11 @@ find_package(OpenCV 3 REQUIRED)
 
 find_package(PCL 1.2 REQUIRED)
 
-find_package(asr_halcon_bridge REQUIRED)
-
 include_directories(
 	include
-	${Halcon_INCLUDE_DIRS}
 	${catkin_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
 	${PCL_INCLUDE_DIRS}
-	${asr_halcon_bridge_INCLUDE_DIRS}
 )
 
 catkin_package(
@@ -35,23 +27,41 @@ catkin_package(
 	LIBRARIES ${PROJECT_NAME}
 )
 
-link_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/bin
-)
-
 add_definitions(${PCL_DEFINITIONS})
 
 add_executable(
-    detect src/detect.cpp
+    detect_pcl_primitives src/detect_pcl_primitives.cpp
 )
 
 target_link_libraries(
-    detect
+    detect_pcl_primitives
 	${catkin_LIBRARIES}
-	${Halcon_LIBRARIES}
 	${OpenCV_LIBRARIES}
 	${PCL_LIBRARIES}
-	${asr_halcon_bridge_LIBRARIES}
 )
 
-add_dependencies(detect ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_executable(
+    load_ply src/load_ply.cpp
+)
+
+target_link_libraries(
+    load_ply
+	${catkin_LIBRARIES}
+	${OpenCV_LIBRARIES}
+	${PCL_LIBRARIES}
+)
+
+add_executable(
+    reduce_pcl src/reduce_pcl.cpp
+)
+
+target_link_libraries(
+    reduce_pcl
+	${catkin_LIBRARIES}
+	${OpenCV_LIBRARIES}
+	${PCL_LIBRARIES}
+)
+
+add_dependencies(detect_pcl_primitives ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(load_ply ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(reduce_pcl ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

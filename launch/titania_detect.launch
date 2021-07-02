@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!--XML-->
+<launch>
+    <!-- SETUP ARGUMENTS -->
+    <!-- enable/disable running rviz in launcher -->
+    <arg name="rviz" default="true" />
+
+    <!-- Reduce point cloud size with VoxelGrid -->
+    <node name="reduce_pcl" pkg="i3dr_detect_pcl_primitives" type="reduce_pcl" output="screen" >
+        <param name="grid_size" type="double" value="0.01" />
+        <remap from="/points2" to="/points2" /> <!-- Input point cloud topic -->
+        <remap from="/points2_reduced" to="/points2_reduced" /> <!-- Output point cloud topic -->
+    </node>
+
+    <!-- Detect primitive in point cloud -->
+    <node name="detect_pcl_primitives" pkg="i3dr_detect_pcl_primitives" type="detect_pcl_primitives" output="screen" >
+        <remap from="/points2" to="/points2_reduced" />
+    </node>
+
+    <!-- DISPLAY -->
+    <!-- run rviz with config file -->
+    <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rivz" 
+        args="-d $(find i3dr_detect_pcl_primitives)/rviz/titania_scene.rviz"/>
+
+</launch>

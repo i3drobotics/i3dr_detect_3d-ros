@@ -1,0 +1,12 @@
+- git:
+    local-name: i3dr_detect_pcl_primitives-ros
+    uri: https://github.com/i3drobotics/i3dr_detect_pcl_primitives-ros
+    version: main
+- git:
+    local-name: asr_halcon_bridge
+    uri: https://github.com/asr-ros/asr_halcon_bridge.git
+    version: master
+- git:
+    local-name: object_recognition_msgs
+    uri: https://github.com/wg-perception/object_recognition_msgs.git
+    version: master

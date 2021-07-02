@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="2">
 
-  <name>i3dr_halcon_object_detect</name>
+  <name>i3dr_detect_pcl_primitives</name>
   <version>1.0.0</version>
-  <description>Object detection using halcon</description>
+  <description>Detect primitives objects in Point Clouds (Sphere, Cylinder)</description>
   <author>Ben Knight</author>
   <maintainer email="bknight@i3drobotics.com">Ben Knight</maintainer>
   <license>BSD</license>
@@ -12,9 +12,9 @@
   <buildtool_depend>catkin</buildtool_depend>  
   <depend>roscpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>object_recognition_msgs</depend>
   <depend>opencv3</depend>
   <depend>cv_bridge</depend>
-  <depend>asr_halcon_bridge</depend>
   <depend>pcl_ros</depend>
   
 </package>
