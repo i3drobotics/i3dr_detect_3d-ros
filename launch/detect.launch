@@ -4,10 +4,11 @@
     <!-- SETUP ARGUMENTS -->
     <!-- enable/disable running rviz in launcher -->
     <arg name="rviz" default="true" />
+    <arg name="point_cloud_filepath" default="/home/i3drwl001/catkin_ws/data/point_clouds/ball001.ply" />
 
     <!-- Load point cloud from file into topic -->
     <node name="load_ply" pkg="i3dr_detect_pcl_primitives" type="load_ply" output="screen" >
-        <param name="filepath" type="string" value="/home/i3drwl001/catkin_ws/data/point_clouds/ball001.ply" />
+        <param name="filepath" type="string" value="$(arg point_cloud_filepath)" />
         <param name="frame_id" type="string" value="/points2" />
         <param name="publish_rate" type="double" value="10" />
         <remap from="/points2" to="/points2" /> <!-- Output point cloud topic -->
