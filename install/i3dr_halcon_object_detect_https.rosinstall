@@ -1,0 +1,8 @@
+- git:
+    local-name: i3dr_stereo_camera-ros
+    uri: https://github.com/i3drobotics/i3dr_halcon_object_detect-ros
+    version: main
+- git:
+    local-name: asr_halcon_bridge
+    uri: https://github.com/asr-ros/asr_halcon_bridge.git
+    version: master

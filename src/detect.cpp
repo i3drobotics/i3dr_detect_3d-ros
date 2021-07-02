@@ -3,12 +3,6 @@
 using namespace HalconCpp;
 using namespace HDevEngineCpp;
 
-struct halcon_variable
-{
-    std::string name;
-    std::vector<std::string> data;
-};
-
 ros::Publisher point_cloud_pub_;
 
 // read PLY point cloud from file using PCL

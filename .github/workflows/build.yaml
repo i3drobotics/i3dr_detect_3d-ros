@@ -1,0 +1,54 @@
+name: Build
+
+on: [push]
+
+# IMPORTANT: BUILD WILL FAIL
+# Requires HALCON. There is no way to do this in a GitHub actions due to license requirements.
+
+jobs:    
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-18.04
+            rosdistro: melodic
+    env:
+      ROS_CI_DESKTOP: "`lsb_release -cs`"  # e.g. [trusty|xenial|...]
+      ROSINSTALL_FILE: $GITHUB_WORKSPACE/dependencies.rosinstall
+      CATKIN_OPTIONS: $GITHUB_WORKSPACE/catkin.options
+      ROS_PARALLEL_JOBS: '-j8 -l6'
+      # Set the python path manually to include /usr/-/python2.7/dist-packages
+      # as this is where apt-get installs python packages.
+      PYTHONPATH: $PYTHONPATH:/usr/lib/python2.7/dist-packages:/usr/local/lib/python2.7/dist-packages
+      ROS_DISTRO: ${{ matrix.rosdistro }}
+    steps:
+      - uses: actions/checkout@v2
+      # Install ROS (http://wiki.ros.org/melodic/Installation/Ubuntu)
+      # ROS base only is install to make sure all required packages are installed during the setup process
+      - name: Install ROS
+        run: |
+            sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
+            curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+            sudo apt update
+            sudo apt install ros-$ROS_DISTRO-ros-base
+            source /opt/ros/$ROS_DISTRO/setup.bash
+            sudo apt install python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential
+            sudo rosdep init
+            rosdep update
+      # Setup ROS workspace for build
+      # wstool is used to install ROS packages that are not in rosdep
+      - name: Setup ROS workspace
+        run: |
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          mkdir -p ~/catkin_ws/src
+          cd ~/catkin_ws
+          catkin build
+          wstool init src $GITHUB_WORKSPACE/install/i3dr_halcon_object_detect_https.rosinstall
+          rosdep install --from-paths src --ignore-src -r -y
+      # Build workspace
+      - name: Build workspace
+        run: |
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          cd ~/catkin_ws
+          catkin build
