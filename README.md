@@ -54,16 +54,35 @@ sudo sh -c 'echo "yaml https://raw.githubusercontent.com/i3drobotics/pylon_camer
 rosdep update
 ```
 
+### I3DR Stereo Matcher
+Install I3DRSGM support package:
+```
+curl https://github.com/i3drobotics/phobosIntegration/releases/download/v1.0.54/Phobos-1.0.54-x86_64_reducedTemplates.deb > i3drsgm.deb
+sudo dpkg -i i3drsgm.deb
+```
+To build with the I3DR Stereo Matcher use the following command:
+``` bash
+catkin_make -DWITH_I3DRSGM=ON
+```
+As I3DR Stereo Matcher uses CUDA the following enviromental varaiables should be set to avoid JIT recompiling:
+```
+export CUDA_CACHE_MAXSIZE=2147483648
+export CUDA_CACHE_DISABLE=0
+```
+Contact info@i3drobotics.com for a license to use this matcher. 
+We will provide you with a license file that should be placed in the following folder after building the workspace:
+```
+~/.ros/LICENSE.lic
+```
+
 ## Build
 To install package dependences use rodep:
 ```
 rosdep install --from-paths src --ignore-src -r -y
 ```
-Build using catkin (tested with catkin_make and catkin_build):
+Build with I3DRSGM support:
 ```
-catkin_make
-or
-catkin build
+catkin_make -DWITH_I3DRSGM=ON
 ```
 Source workspace build to make package available
 ```
@@ -77,9 +96,9 @@ To test the package with a point cloud (.ply) file use the provided launch file:
 roslaunch i3dr_detect_pcl_primitives detect.launch point_cloud_filepath:=/path/to/pointcloud.ply
 ```
 
-Alternatively to run with live point cloud from Titania. Plug in your Titania camera to your machine and use the following launch file to capture data from the stereo camera:
+Alternatively to run with live point cloud from Titania. Plug in your Titania camera to your machine and use the following launch file to capture data from the stereo camera (add 'stereo_algorithm:=2' parameter to use the I3DRSGM stereo matcher):
 ```
-roslaunch i3dr_titania titania.launch
+roslaunch i3dr_titania titania.launch stereo_algorithm:=2
 ```
 
 Then in a new terminal launch the Titania primitive detection:
