@@ -15,7 +15,8 @@
 #include <boost/filesystem.hpp>
 
 #include <opencv2/core/core.hpp>
-#include <opencv/cv.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 #include <cv_bridge/cv_bridge.h>
 

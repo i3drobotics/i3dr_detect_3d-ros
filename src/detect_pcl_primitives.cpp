@@ -332,7 +332,6 @@ int main(int argc, char **argv)
 
     detection_object_type_ = DETECTION_OBJECT_CYLINDER;
 
-    point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2", 1);
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
     point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
 
