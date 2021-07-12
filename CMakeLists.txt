@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	sensor_msgs
 	tf
+	angles
 	visualization_msgs
 	object_recognition_msgs
     cv_bridge
