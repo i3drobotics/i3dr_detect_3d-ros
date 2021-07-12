@@ -24,7 +24,23 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
+#include <pcl/common/transforms.h>
 #include <pcl/io/ply_io.h>
+#include <pcl/io/vtk_lib_io.h>
+
+#include <pcl/filters/passthrough.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/approximate_voxel_grid.h>
+
+#include <pcl/tracking/tracking.h>
+#include <pcl/tracking/particle_filter.h>
+#include <pcl/tracking/kld_adaptive_particle_filter_omp.h>
+#include <pcl/tracking/particle_filter_omp.h>
+#include <pcl/tracking/coherence.h>
+#include <pcl/tracking/distance_coherence.h>
+#include <pcl/tracking/hsv_color_coherence.h>
+#include <pcl/tracking/approx_nearest_pair_point_cloud_coherence.h>
+#include <pcl/tracking/nearest_pair_point_cloud_coherence.h>
 
 #include <pcl/ModelCoefficients.h>
 #include <pcl/filters/extract_indices.h>

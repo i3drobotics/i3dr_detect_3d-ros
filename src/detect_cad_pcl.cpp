@@ -1,12 +1,8 @@
 #include "detect_cad_pcl.h"
 
 typedef pcl::PointXYZRGB PointT;
-// enum for supported detection object types
-enum DetectionObjectType {
-    DETECTION_OBJECT_UNKNOWN,
-    DETECTION_OBJECT_CYLINDER,
-    DETECTION_OBJECT_SPHERE
-};
+typedef pcl::tracking::ParticleXYZRPY ParticleT;
+typedef pcl::tracking::ParticleFilterTracker<PointT, ParticleT> ParticleFilter;
 
 // define global ros publishers
 ros::Publisher point_cloud_pub_;
@@ -17,9 +13,10 @@ ros::Publisher detection_object_pub_;
 ros::Publisher detection_marker_pub_;
 
 // define global variables
-DetectionObjectType detection_object_type_ = DETECTION_OBJECT_UNKNOWN;
+pcl::PointCloud<PointT>::Ptr in_cad_points_;
 visualization_msgs::Marker detection_marker_;
 std::string recognized_objects_ns = "recognized_objects";
+ParticleFilter::Ptr tracker_;
 
 tf::Vector3 poseToVector(const geometry_msgs::Pose& pose) {
 	const float px = static_cast<float>(pose.position.x);
@@ -42,6 +39,97 @@ void publish_point_cloud(ros::Publisher pub, pcl::PointCloud<PointT>::Ptr cloud,
     pcl::toROSMsg(*cloud, pcl2_msg);
     pcl2_msg.header.frame_id = frame_id;
     pub.publish(pcl2_msg);
+}
+
+void load_cad_file(std::string filename){
+    pcl::PolygonMesh mesh;
+
+    if (pcl::io::loadPolygonFileSTL (filename, mesh) == 0)
+    {
+        PCL_ERROR("Failed to load STL file\n");
+    }
+
+    // Extract cloud from mesh
+    pcl::fromPCLPointCloud2(mesh.cloud, *in_cad_points_);
+}
+
+void gridSampleApprox (const pcl::PointCloud<PointT>::Ptr &cloud, pcl::PointCloud<PointT> &result, double leaf_size)
+{
+  pcl::ApproximateVoxelGrid<PointT> grid;
+  grid.setLeafSize (static_cast<float> (leaf_size), static_cast<float> (leaf_size), static_cast<float> (leaf_size));
+  grid.setInputCloud (cloud);
+  grid.filter (result);
+}
+
+void init_tracker(){
+    double downsampling_grid_size =  0.002;
+
+    // Setup partical tracker
+    pcl::tracking::KLDAdaptiveParticleFilterOMPTracker<PointT, ParticleT>::Ptr tracker
+        (new pcl::tracking::KLDAdaptiveParticleFilterOMPTracker<PointT, ParticleT> (8));
+
+    std::vector<double> default_step_covariance = std::vector<double> (6, 0.015 * 0.015);
+    default_step_covariance[3] *= 40.0;
+    default_step_covariance[4] *= 40.0;
+    default_step_covariance[5] *= 40.0;
+
+    std::vector<double> initial_noise_covariance = std::vector<double> (6, 0.00001);
+    std::vector<double> default_initial_mean = std::vector<double> (6, 0.0);
+
+    ParticleT bin_size;
+    bin_size.x = 0.1f;
+    bin_size.y = 0.1f;
+    bin_size.z = 0.1f;
+    bin_size.roll = 0.1f;
+    bin_size.pitch = 0.1f;
+    bin_size.yaw = 0.1f;
+
+    // TODO Set all parameters for  KLDAdaptiveParticleFilterOMPTracker
+    //tracker->setMaximumParticleNum (1000);
+    //tracker->setDelta (0.99);
+    //tracker->setEpsilon (0.2);
+    //tracker->setBinSize (bin_size);
+
+    // TODO Set all parameters for  ParticleFilter
+    tracker_ = tracker;
+    //tracker_->setTrans (Eigen::Affine3f::Identity ());
+    //tracker_->setStepNoiseCovariance (default_step_covariance);
+    //tracker_->setInitialNoiseCovariance (initial_noise_covariance);
+    //tracker_->setInitialNoiseMean (default_initial_mean);
+    //tracker_->setIterationNum (1);
+    //tracker_->setParticleNum (600);
+    //tracker_->setResampleLikelihoodThr(0.00);
+    //tracker_->setUseNormal (false);
+
+    // Setup coherence object for tracking
+    pcl::tracking::ApproxNearestPairPointCloudCoherence<PointT>::Ptr coherence
+        (new pcl::tracking::ApproxNearestPairPointCloudCoherence<PointT>);
+
+    pcl::tracking::DistanceCoherence<PointT>::Ptr distance_coherence
+        (new pcl::tracking::DistanceCoherence<PointT>);
+    coherence->addPointCoherence (distance_coherence);
+
+    pcl::search::Octree<PointT>::Ptr search (new pcl::search::Octree<PointT> (0.01));
+    coherence->setSearchMethod (search);
+    coherence->setMaximumDistance (0.01);
+
+    //TODO
+    //tracker_->setCloudCoherence (coherence);
+
+    //prepare the model of tracker's target
+    Eigen::Vector4f c;
+    Eigen::Affine3f trans = Eigen::Affine3f::Identity ();
+    pcl::PointCloud<PointT>::Ptr transed_ref (new pcl::PointCloud<PointT>);
+    pcl::PointCloud<PointT>::Ptr transed_ref_downsampled (new pcl::PointCloud<PointT>);
+
+    pcl::compute3DCentroid<PointT> (*in_cad_points_, c);
+    trans.translation ().matrix () = Eigen::Vector3f (c[0], c[1], c[2]);
+    pcl::transformPointCloud<PointT> (*in_cad_points_, *transed_ref, trans.inverse());
+    gridSampleApprox(transed_ref, *transed_ref_downsampled, downsampling_grid_size);
+
+    //TODO set reference model and trans
+    //tracker_->setReferenceCloud (transed_ref_downsampled);
+    //tracker_->setTrans (trans);
 }
 
 void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
@@ -67,23 +155,6 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pcl::ModelCoefficients::Ptr seg_coefficients (new pcl::ModelCoefficients);
     pcl::PointIndices::Ptr plane_inliers (new pcl::PointIndices);
     pcl::PointIndices::Ptr seg_inliers (new pcl::PointIndices);
-
-    // Choose SACMODEL from DetectionObjectType
-    pcl::SacModel sac_model;
-    std::string detection_object_type_str;
-    switch(detection_object_type_){
-        case DETECTION_OBJECT_CYLINDER:
-            detection_object_type_str = "cylinder";
-            sac_model = pcl::SACMODEL_CYLINDER;
-            break;
-        case DETECTION_OBJECT_SPHERE:
-            detection_object_type_str = "sphere";
-            sac_model = pcl::SACMODEL_SPHERE;
-            break;
-        default:
-            ROS_ERROR("Invalid detection object type enum: %d. line: %d, file: %s", detection_object_type_, __LINE__, __FILE__);
-            return;
-    }
 
     // Build a passthrough filter to remove spurious NaNs and scene background
     pass.setInputCloud (cloud);
@@ -155,108 +226,23 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     extract_normals.setIndices (plane_inliers);
     extract_normals.filter (*cloud_normals2);
 
-    // Create the segmentation object for sphere segmentation and set all the parameters
-    seg.setOptimizeCoefficients (false);
-    seg.setModelType (sac_model);
-    seg.setMethodType (pcl::SAC_RANSAC);
-    seg.setNormalDistanceWeight (0.1);
-    seg.setMaxIterations (5000);
-    seg.setDistanceThreshold (0.01);
-    seg.setRadiusLimits (0.0, 0.06);
-    seg.setInputCloud (cloud_inlier_filtered);
-    seg.setInputNormals (cloud_normals2);
-    // Obtain the cylinder inliers and coefficients
-    seg.segment (*seg_inliers, *seg_coefficients);
-
-    if (seg_coefficients->values[2] < 0){
-        ROS_ERROR(
-            "Invalid segmentation coefficients: (%.3f,%.3f,%.3f)",
-            seg_coefficients->values[0], seg_coefficients->values[1], seg_coefficients->values[2]
-        );
-        return;
-    }
-
-    if (seg_inliers->indices.size () == 0)
-    {
-        ROS_ERROR("No segmentation inliers found");
-        return;
-    }
-
+    // TODO detect CAD object in point cloud
+    tracker_->setInputCloud (cloud_inlier_filtered);
+	tracker_->compute();
+    
     // publish the segmented inliers to topic
-    extract.setInputCloud (cloud_inlier_filtered);
-    extract.setIndices (seg_inliers);
-    extract.setNegative (false);
-    pcl::PointCloud<PointT>::Ptr cloud_cylinder (new pcl::PointCloud<PointT> ());
-    extract.filter (*cloud_cylinder);
-    if (cloud_cylinder->points.empty ()){
-        ROS_ERROR("Segmented object is empty");
+    pcl::PointCloud<PointT>::Ptr cloud_detect_object (new pcl::PointCloud<PointT> ());
+    extract.filter (*cloud_detect_object);
+    if (cloud_detect_object->points.empty ()){
+        ROS_ERROR("Detected object is empty");
         return;
     } else {
-        publish_point_cloud(point_cloud_segment_pub_, cloud_cylinder, cloud_msg->header.frame_id);
+        publish_point_cloud(point_cloud_segment_pub_, cloud_detect_object, cloud_msg->header.frame_id);
     }
 
-    Eigen::Vector4f centroid;
-    pcl::compute3DCentroid(*cloud_cylinder, centroid);
-
-
-    
-    // Coefficents from RANSAC are different for each model type
-    // (https://pointclouds.org/documentation/group__sample__consensus.html)
-    // SACMODEL_SPHERE:
-    //      Used to determine sphere models. 
-    //      The four coefficients of the sphere are given by its 3D center and radius as:
-    //          [center.x center.y center.z radius]
-    // SACMODEL_CYLINDER:
-    //      Used to determine cylinder models.
-    //      The seven coefficients of the cylinder are given by a point on its axis, the axis direction, and a radius, as:
-    //          [point_on_axis.x point_on_axis.y point_on_axis.z axis_direction.x axis_direction.y axis_direction.z radius]
-
-    // Extract position and rotation from coefficients for each model type
+    // TODO Extract position and rotation from localisation
     float position[3];
     float rotation[4];
-
-    switch(detection_object_type_){
-        case DETECTION_OBJECT_CYLINDER:
-            // Extract position and rotation from coefficients for cylinder model
-            position[0] = seg_coefficients->values[0];
-            position[1] = seg_coefficients->values[1];
-            position[2] = seg_coefficients->values[2];
-            // position[0] = centroid[0];
-            // position[1] = centroid[1];
-            // position[2] = centroid[2];
-            rotation[0] = seg_coefficients->values[3];
-            rotation[1] = seg_coefficients->values[4];
-            rotation[2] = seg_coefficients->values[5];
-            rotation[3] = seg_coefficients->values[6];
-            // rotation[0] = 0;
-            // rotation[1] = 0;
-            // rotation[2] = 0;
-            // rotation[3] = 1.0;
-            break;
-        case DETECTION_OBJECT_SPHERE:
-            // Extract position and rotation from coefficients for sphere model
-            // Rotation is irrelevent for a sphere
-            position[0] = seg_coefficients->values[0];
-            position[1] = seg_coefficients->values[1];
-            position[2] = seg_coefficients->values[2];
-            // position[0] = centroid[0];
-            // position[1] = centroid[1];
-            // position[2] = centroid[2];
-            rotation[0] = 0;
-            rotation[1] = 0;
-            rotation[2] = 0;
-            rotation[3] = 1.0;
-            break;
-        default:
-            ROS_ERROR("Invalid detection object type enum: %d. line: %d, file: %s", detection_object_type_, __LINE__, __FILE__);
-            return;
-    }
-
-    ROS_INFO(
-        "Object detected at: (%.3f, %.3f, %.3f) (%.3f,%.3f,%.3f,%.3f)",
-        position[0], position[1], position[2],
-        rotation[0], rotation[1], rotation[2], rotation[3]
-    );
 
     object_recognition_msgs::RecognizedObject object;
     object.confidence = 1.0; // TODO: get confidence from segmentation
@@ -330,7 +316,20 @@ int main(int argc, char **argv)
 
     std::string ns = ros::this_node::getNamespace();
 
-    detection_object_type_ = DETECTION_OBJECT_CYLINDER;
+    std::string in_cad_filepath;
+
+    if (p_nh.getParam("cad_filepath", in_cad_filepath))
+    {
+        ROS_INFO("cad_filepath: %s", in_cad_filepath.c_str());
+    } else {
+        ROS_ERROR("No cad_filepath specified. Exiting.");
+        return 1;
+    }
+
+    // load CAD from file
+    // convert CAD file to point cloud
+    load_cad_file(in_cad_filepath);
+    init_tracker();
 
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
     point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
