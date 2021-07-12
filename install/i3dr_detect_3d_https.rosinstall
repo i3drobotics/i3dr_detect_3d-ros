@@ -1,6 +1,6 @@
 - git:
-    local-name: i3dr_detect_pcl_primitives-ros
-    uri: https://github.com/i3drobotics/i3dr_detect_pcl_primitives-ros
+    local-name: i3dr_detect_3d-ros-ros
+    uri: https://github.com/i3drobotics/i3dr_detect_3d-ros-ros
     version: main
 - git:
     local-name: object_recognition_msgs

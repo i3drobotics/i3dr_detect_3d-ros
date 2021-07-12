@@ -41,7 +41,7 @@ jobs:
           mkdir -p ~/catkin_ws/src
           cd ~/catkin_ws
           catkin build
-          wstool init src $GITHUB_WORKSPACE/install/i3dr_detect_pcl_primitives_https.rosinstall
+          wstool init src $GITHUB_WORKSPACE/install/i3dr_detect_3d_https.rosinstall
           rosdep install --from-paths src --ignore-src -r -y
       - name: Build workspace
         run: |
