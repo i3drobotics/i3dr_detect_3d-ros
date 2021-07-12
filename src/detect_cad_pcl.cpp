@@ -1,4 +1,4 @@
-#include "detect_pcl_primitives.h"
+#include "detect_cad_pcl.h"
 
 typedef pcl::PointXYZRGB PointT;
 // enum for supported detection object types
@@ -324,7 +324,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "detect_pcl_primitives");
+    ros::init(argc, argv, "detect_cad");
     ros::NodeHandle nh;
     ros::NodeHandle p_nh("~");
 

@@ -39,7 +39,7 @@ void point_cloud_reduce_callback (const sensor_msgs::PointCloud2ConstPtr& cloud_
 int main(int argc, char **argv)
 {
     // ROS node initialization
-    ros::init(argc, argv, "reduce_pcl");
+    ros::init(argc, argv, "reduce_points");
     ros::NodeHandle nh;
     ros::NodeHandle p_nh("~");
 

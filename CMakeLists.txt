@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.1)
-project(i3dr_detect_pcl_primitives)
+project(i3dr_detect_3d)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -31,11 +31,22 @@ catkin_package(
 add_definitions(${PCL_DEFINITIONS})
 
 add_executable(
-    detect_pcl_primitives src/detect_pcl_primitives.cpp
+    detect_primitives src/detect_primitives_pcl.cpp
 )
 
 target_link_libraries(
-    detect_pcl_primitives
+    detect_primitives
+	${catkin_LIBRARIES}
+	${OpenCV_LIBRARIES}
+	${PCL_LIBRARIES}
+)
+
+add_executable(
+    detect_cad src/detect_cad_pcl.cpp
+)
+
+target_link_libraries(
+    detect_cad
 	${catkin_LIBRARIES}
 	${OpenCV_LIBRARIES}
 	${PCL_LIBRARIES}
@@ -53,16 +64,17 @@ target_link_libraries(
 )
 
 add_executable(
-    reduce_pcl src/reduce_pcl.cpp
+    reduce_points src/reduce_pcl.cpp
 )
 
 target_link_libraries(
-    reduce_pcl
+    reduce_points
 	${catkin_LIBRARIES}
 	${OpenCV_LIBRARIES}
 	${PCL_LIBRARIES}
 )
 
-add_dependencies(detect_pcl_primitives ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(detect_primitives ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(detect_cad ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_dependencies(load_ply ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(reduce_pcl ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(reduce_points ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

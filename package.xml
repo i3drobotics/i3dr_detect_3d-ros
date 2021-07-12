@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <package format="2">
 
-  <name>i3dr_detect_pcl_primitives</name>
+  <name>i3dr_detect_3d</name>
   <version>1.0.0</version>
-  <description>Detect primitives objects in Point Clouds (Sphere, Cylinder)</description>
+  <description>Detect 3D objects in point clouds</description>
   <author>Ben Knight</author>
   <maintainer email="bknight@i3drobotics.com">Ben Knight</maintainer>
   <license>BSD</license>
-  <url type="website">https://github.com/i3drobotics/i3dr_halcon_object_detect-ros</url>
+  <url type="website">https://github.com/i3drobotics/i3dr_detect_3d-ros</url>
   
   <buildtool_depend>catkin</buildtool_depend>  
   <depend>roscpp</depend>

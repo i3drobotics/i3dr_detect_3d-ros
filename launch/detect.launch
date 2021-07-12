@@ -7,7 +7,7 @@
     <arg name="point_cloud_filepath" default="/home/i3drwl001/catkin_ws/data/point_clouds/ball001.ply" />
 
     <!-- Load point cloud from file into topic -->
-    <node name="load_ply" pkg="i3dr_detect_pcl_primitives" type="load_ply" output="screen" >
+    <node name="load_ply" pkg="i3dr_detect_3d" type="load_ply" output="screen" >
         <param name="filepath" type="string" value="$(arg point_cloud_filepath)" />
         <param name="frame_id" type="string" value="/points2" />
         <param name="publish_rate" type="double" value="10" />
@@ -15,20 +15,20 @@
     </node>
 
     <!-- Reduce point cloud size with VoxelGrid -->
-    <node name="reduce_pcl" pkg="i3dr_detect_pcl_primitives" type="reduce_pcl" output="screen" >
+    <node name="reduce_points" pkg="i3dr_detect_3d" type="reduce_points" output="screen" >
         <param name="grid_size" type="double" value="0.01" />
         <remap from="/points2" to="/points2" /> <!-- Input point cloud topic -->
         <remap from="/points2_reduced" to="/points2_reduced" /> <!-- Output point cloud topic -->
     </node>
 
     <!-- Detect primitive in point cloud -->
-    <node name="detect_pcl_primitives" pkg="i3dr_detect_pcl_primitives" type="detect_pcl_primitives" output="screen" >
+    <node name="detect_primitives" pkg="i3dr_detect_3d" type="detect_primitives" output="screen" >
         <remap from="/points2" to="/points2_reduced" />
     </node>
 
     <!-- DISPLAY -->
     <!-- run rviz with config file -->
     <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rivz" 
-        args="-d $(find i3dr_detect_pcl_primitives)/rviz/scene.rviz"/>
+        args="-d $(find i3dr_detect_3d)/rviz/scene.rviz"/>
 
 </launch>

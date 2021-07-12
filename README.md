@@ -1,7 +1,7 @@
-# ROS package for object detection with Halcon
+# ROS package for 3D object detection in point cloud
 
 ## Status
-[![Build](https://github.com/i3drobotics/i3dr_detect_pcl_primitives-ros/actions/workflows/build.yaml/badge.svg)](https://github.com/i3drobotics/i3dr_detect_pcl_primitives-ros/actions/workflows/build.yaml)
+[![Build](https://github.com/i3drobotics/i3dr_detect_3d-ros/actions/workflows/build.yaml/badge.svg)](https://github.com/i3drobotics/i3dr_detect_3d-ros/actions/workflows/build.yaml)
 
 ## Setup
 
@@ -17,11 +17,11 @@ mkdir ~/catkin_ws/src
 For an easy setup, a rosinstall file is provided in 'install' folder of this repo which can be used to get this package and it's dependent ros packages in your workspace. 
 In your ROS workspace use the following command:
 ```
-wstool init src https://raw.githubusercontent.com/i3drobotics/i3dr_detect_pcl_primitives-ros/main/install/i3dr_detect_pcl_primitives_https.rosinstall
+wstool init src https://raw.githubusercontent.com/i3drobotics/i3dr_detect_3d-ros/main/install/i3dr_detect_3d_https.rosinstall
 ```
 If you already have a wstool workspace setup then use the following command instead:
 ```
-wstool merge -t src https://raw.githubusercontent.com/i3drobotics/i3dr_detect_pcl_primitives-ros/main/install/i3dr_detect_pcl_primitives_https.rosinstall
+wstool merge -t src https://raw.githubusercontent.com/i3drobotics/i3dr_detect_3d-ros/main/install/i3dr_detect_3d_https.rosinstall
 wstool update -t src
 ```
 To use this package with I3DR's Titania stereo camera also add  the following rosinstall:
@@ -34,7 +34,7 @@ wstool update -t src
 If you do not use wstool, you can download the packages using the following command:
 ```
 cd PATH_TO_ROS_WS/src
-git clone https://github.com/i3drobotics/i3dr_detect_pcl_primitives-ros
+git clone https://github.com/i3drobotics/i3dr_detect_3d-ros
 git clone https://github.com/wg-perception/object_recognition_msgs.git
 git clone https://github.com/i3drobotics/i3dr_titania-ros.git
 git clone https://github.com/i3drobotics/i3dr_stereo_camera-ros.git
@@ -93,7 +93,7 @@ source devel/setup.bash
 This package can be run standalone but is optimised for point clouds from I3DR's Titania stereo camera.  
 To test the package with a point cloud (.ply) file use the provided launch file: 
 ```
-roslaunch i3dr_detect_pcl_primitives detect.launch point_cloud_filepath:=/path/to/pointcloud.ply
+roslaunch i3dr_detect_3d detect.launch point_cloud_filepath:=/path/to/pointcloud.ply
 ```
 
 Alternatively to run with live point cloud from Titania. Plug in your Titania camera to your machine and use the following launch file to capture data from the stereo camera (add 'stereo_algorithm:=2' parameter to use the I3DRSGM stereo matcher):
@@ -103,5 +103,5 @@ roslaunch i3dr_titania titania.launch stereo_algorithm:=2
 
 Then in a new terminal launch the Titania primitive detection:
 ```
-roslaunch i3dr_detect_pcl_primitives detect.launch
+roslaunch i3dr_detect_3d detect.launch
 ```
