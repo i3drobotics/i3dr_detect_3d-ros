@@ -157,10 +157,10 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     // Build a passthrough filter to remove spurious NaNs and scene background
     pass.setInputCloud (cloud);
     pass.setFilterFieldName ("z");
-    pass.setFilterLimits (0, 3.0);
+    pass.setFilterLimits (0, 2.0);
     pass.filter (*cloud_passthrough_filtered);
 
-    if (cloud_passthrough_filtered->points.size () > 30000){
+    if (cloud_passthrough_filtered->points.size () > 100000){
         ROS_ERROR("Point cloud too large (%lu points). Conside increasing voxel grid size.",cloud_passthrough_filtered->points.size ());
         return;
     }
@@ -208,10 +208,6 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     // Remove the planar inliers, extract the rest
     extract.setNegative (true);
     extract.filter (*cloud_inlier_filtered);
-    extract_normals.setNegative (true);
-    extract_normals.setInputCloud (cloud_normals);
-    extract_normals.setIndices (plane_inliers);
-    extract_normals.filter (*cloud_normals2);
 
     // Create the filtering object
     pcl::StatisticalOutlierRemoval<PointT> sor;

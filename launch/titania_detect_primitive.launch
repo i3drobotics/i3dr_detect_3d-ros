@@ -28,14 +28,13 @@
     </node>
 
     <!-- Detect cad in point cloud -->
-    <node name="detect_cad" pkg="i3dr_detect_3d" type="detect_cad" output="screen" >
+    <node name="detect_primitives" pkg="i3dr_detect_3d" type="detect_primitives" output="screen" >
         <remap from="/points2" to="$(arg titania_ns)/points2_reduced" />
-        <param name="cad_filepath" type="string" value="$(arg cad_filepath)" />
     </node>
 
     <!-- DISPLAY -->
     <!-- run rviz with config file -->
     <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rivz" 
-        args="-d $(find i3dr_detect_3d)/rviz/titania_cad.rviz"/>
+        args="-d $(find i3dr_detect_3d)/rviz/titania_prim.rviz"/>
 
 </launch>

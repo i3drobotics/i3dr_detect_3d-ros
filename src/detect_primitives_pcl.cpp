@@ -58,7 +58,6 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pcl::search::KdTree<PointT>::Ptr tree (new pcl::search::KdTree<PointT> ());
 
     // Create point cloud objects
-    pcl::PointCloud<PointT>::Ptr cloud_voxel_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<PointT>::Ptr cloud_passthrough_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals (new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud<PointT>::Ptr cloud_inlier_filtered (new pcl::PointCloud<PointT>);
@@ -91,28 +90,16 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pass.setFilterLimits (0, 3.0);
     pass.filter (*cloud_passthrough_filtered);
 
-    // Perform the actual filtering
-    double grid_size = 0.01;
-    pcl::VoxelGrid<PointT> sor;
-    sor.setInputCloud (cloud_passthrough_filtered);
-    sor.setLeafSize (grid_size, grid_size, grid_size);
-    sor.filter (*cloud_voxel_filtered);
+    ROS_INFO("Detecting primitive on %lu points: ", cloud_passthrough_filtered->points.size());
 
-    if (cloud_voxel_filtered->points.empty ()){
-        ROS_ERROR("No points found in grid filtered point cloud");
-        return;
-    }
-
-    ROS_INFO("Detecting primitive on %lu points: ", cloud_voxel_filtered->points.size());
-
-    if (cloud_voxel_filtered->points.size () > 20000){
-        ROS_ERROR("Point cloud too large. Conside increasing voxel grid size.");
-        return;
-    }
+    // if (cloud_passthrough_filtered->points.size () > 100000){
+    //     ROS_ERROR("Point cloud too large (%lu points). Conside increasing voxel grid size.",cloud_passthrough_filtered->points.size ());
+    //     return;
+    // }
 
     // Estimate point normals
     ne.setSearchMethod (tree);
-    ne.setInputCloud (cloud_voxel_filtered);
+    ne.setInputCloud (cloud_passthrough_filtered);
     ne.setKSearch (50);
     ne.compute (*cloud_normals);
 
@@ -123,7 +110,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     seg.setMethodType (pcl::SAC_RANSAC);
     seg.setMaxIterations (100);
     seg.setDistanceThreshold (0.03);
-    seg.setInputCloud (cloud_voxel_filtered);
+    seg.setInputCloud (cloud_passthrough_filtered);
     seg.setInputNormals (cloud_normals);
     // Obtain the plane inliers and coefficients
     seg.segment (*plane_inliers, *plane_coefficients);
@@ -135,7 +122,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     }
 
     // Extract the planar inliers from the input cloud
-    extract.setInputCloud (cloud_voxel_filtered);
+    extract.setInputCloud (cloud_passthrough_filtered);
     extract.setIndices (plane_inliers);
     extract.setNegative (false);
     pcl::PointCloud<PointT>::Ptr cloud_plane (new pcl::PointCloud<PointT> ());
@@ -156,7 +143,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     extract_normals.filter (*cloud_normals2);
 
     // Create the segmentation object for sphere segmentation and set all the parameters
-    seg.setOptimizeCoefficients (false);
+    seg.setOptimizeCoefficients (true);
     seg.setModelType (sac_model);
     seg.setMethodType (pcl::SAC_RANSAC);
     seg.setNormalDistanceWeight (0.1);
@@ -198,8 +185,6 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     Eigen::Vector4f centroid;
     pcl::compute3DCentroid(*cloud_cylinder, centroid);
 
-
-    
     // Coefficents from RANSAC are different for each model type
     // (https://pointclouds.org/documentation/group__sample__consensus.html)
     // SACMODEL_SPHERE:
@@ -213,21 +198,22 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
 
     // Extract position and rotation from coefficients for each model type
     float position[3];
-    float rotation[4];
+    float rotation[3];
+    float radius;
 
     switch(detection_object_type_){
         case DETECTION_OBJECT_CYLINDER:
             // Extract position and rotation from coefficients for cylinder model
-            position[0] = seg_coefficients->values[0];
-            position[1] = seg_coefficients->values[1];
+            // position[0] = seg_coefficients->values[0];
+            // position[1] = seg_coefficients->values[1];
             position[2] = seg_coefficients->values[2];
-            // position[0] = centroid[0];
-            // position[1] = centroid[1];
+            position[0] = centroid[0];
+            position[1] = centroid[1];
             // position[2] = centroid[2];
             rotation[0] = seg_coefficients->values[3];
             rotation[1] = seg_coefficients->values[4];
             rotation[2] = seg_coefficients->values[5];
-            rotation[3] = seg_coefficients->values[6];
+            radius = seg_coefficients->values[6];
             // rotation[0] = 0;
             // rotation[1] = 0;
             // rotation[2] = 0;
@@ -253,9 +239,9 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     }
 
     ROS_INFO(
-        "Object detected at: (%.3f, %.3f, %.3f) (%.3f,%.3f,%.3f,%.3f)",
+        "Object detected at: (%.3f, %.3f, %.3f) (%.3f,%.3f,%.3f) radius: (%.3f)",
         position[0], position[1], position[2],
-        rotation[0], rotation[1], rotation[2], rotation[3]
+        rotation[0], rotation[1], rotation[2], radius
     );
 
     object_recognition_msgs::RecognizedObject object;
@@ -269,13 +255,17 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     object_pose.pose.pose.position.y = position[1];
     object_pose.pose.pose.position.z = position[2];
 
+    quaternion = Eigen::Quaternionf (pca.getEigenVectors ());
+
     // Add rotation to object pose
-    tf::Quaternion quat = tf::Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+    //tf::Quaternion quat = tf::Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+    tf::Quaternion quat;
+    quat.setRPY(rotation[0], rotation[1], rotation[2]);
     tf::Quaternion quat_offset;
     quat_offset.setRPY(
-        angles::to_degrees(0),
-        angles::to_degrees(0),
-        angles::to_degrees(90)
+        angles::from_degrees(0),
+        angles::from_degrees(0),
+        angles::from_degrees(0)
     );
     quat *= quat_offset;
     quat.normalize();
@@ -308,9 +298,9 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     detection_marker_.color.a = 1.0;
     
     // Seems to work for mm models
-    detection_marker_.scale.x = 0.1;
-    detection_marker_.scale.y = 0.1;
-    detection_marker_.scale.z = 0.1;
+    detection_marker_.scale.x = 0.08;
+    detection_marker_.scale.y = 0.08;
+    detection_marker_.scale.z = 0.15;
     
     detection_marker_.pose.orientation = object_pose.pose.pose.orientation;
     detection_marker_.pose.position = object_pose.pose.pose.position;
