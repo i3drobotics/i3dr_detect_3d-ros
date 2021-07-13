@@ -5,6 +5,7 @@ typedef pcl::PointXYZRGB PointT;
 // define global ros publishers
 ros::Publisher point_cloud_pub_;
 ros::Publisher point_cloud_plane_pub_;
+ros::Publisher point_cloud_plane_removed_pub_;
 ros::Publisher point_cloud_segment_pub_;
 ros::Publisher point_cloud_in_cad_pub_;
 ros::Publisher point_cloud_cad_ref_pub_;
@@ -122,9 +123,9 @@ void init_icp(){
     icp_ = pcl::IterativeClosestPoint<PointT, PointT> ();
     icp_.setMaximumIterations (200);
     //icp_.setRANSACOutlierRejectionThreshold(0.03);
-    icp_.setMaxCorrespondenceDistance(1.0);
-    icp_.setTransformationEpsilon(0.01);
-    icp_.setEuclideanFitnessEpsilon(0.1);
+    icp_.setMaxCorrespondenceDistance(0.5);
+    //icp_.setTransformationEpsilon(0.01);
+    //icp_.setEuclideanFitnessEpsilon(0.1);
     icp_.setInputSource(cad_detect_points_);
 }
 
@@ -146,6 +147,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pcl::PointCloud<PointT>::Ptr cloud_passthrough_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals (new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud<PointT>::Ptr cloud_inlier_filtered (new pcl::PointCloud<PointT>);
+    pcl::PointCloud<PointT>::Ptr cloud_outlier_filtered (new pcl::PointCloud<PointT>);
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals2 (new pcl::PointCloud<pcl::Normal>);
     pcl::ModelCoefficients::Ptr plane_coefficients (new pcl::ModelCoefficients);
     pcl::ModelCoefficients::Ptr seg_coefficients (new pcl::ModelCoefficients);
@@ -155,15 +157,16 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     // Build a passthrough filter to remove spurious NaNs and scene background
     pass.setInputCloud (cloud);
     pass.setFilterFieldName ("z");
-    pass.setFilterLimits (0, 5.0);
+    pass.setFilterLimits (0, 3.0);
     pass.filter (*cloud_passthrough_filtered);
 
-    if (cloud_passthrough_filtered->points.size () > 20000){
-        ROS_ERROR("Point cloud too large. Conside increasing voxel grid size.");
+    if (cloud_passthrough_filtered->points.size () > 30000){
+        ROS_ERROR("Point cloud too large (%lu points). Conside increasing voxel grid size.",cloud_passthrough_filtered->points.size ());
         return;
     }
 
     ROS_INFO("Detecting object in %lu points: ", cloud_passthrough_filtered->points.size());
+    ROS_INFO("FrameID: %s", cloud_msg->header.frame_id.c_str());
 
     // Estimate point normals
     ne.setSearchMethod (tree);
@@ -210,6 +213,20 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     extract_normals.setIndices (plane_inliers);
     extract_normals.filter (*cloud_normals2);
 
+    // Create the filtering object
+    pcl::StatisticalOutlierRemoval<PointT> sor;
+    sor.setInputCloud (cloud_inlier_filtered);
+    sor.setMeanK (50);
+    sor.setStddevMulThresh (0.2);
+    sor.filter (*cloud_outlier_filtered);
+
+    if (cloud_outlier_filtered->points.empty ()){
+        ROS_ERROR("Plane removed object is empty");
+        return;
+    } else {
+        publish_point_cloud(point_cloud_plane_removed_pub_, cloud_outlier_filtered, cloud_msg->header.frame_id);
+    }
+
     // TODO detect CAD object in point cloud
     icp_.setInputTarget(cloud_inlier_filtered);
     pcl::PointCloud<PointT>::Ptr icp_result (new pcl::PointCloud<PointT> ());
@@ -224,7 +241,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
             ROS_ERROR("ICP result is empty");
             return;
         } else {
-            icp_.setInputSource(icp_result);
+            //icp_.setInputSource(icp_result);
             publish_point_cloud(point_cloud_segment_pub_, icp_result, cloud_msg->header.frame_id);
         }
     }
@@ -338,6 +355,7 @@ int main(int argc, char **argv)
 
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
     point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
+    point_cloud_plane_removed_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane_removed", 1);
     point_cloud_in_cad_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_in_cad", 1);
     point_cloud_cad_ref_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_cad_ref", 1);
 

@@ -17,7 +17,7 @@
 
     <!-- Reduce point cloud size with VoxelGrid -->
     <node name="reduce_points" pkg="i3dr_detect_3d" type="reduce_points" output="screen" >
-        <param name="grid_size" type="double" value="0.01" />
+        <param name="grid_size" type="double" value="0.0035" />
         <remap from="/points2" to="/points2" /> <!-- Input point cloud topic -->
         <remap from="/points2_reduced" to="/points2_reduced" /> <!-- Output point cloud topic -->
     </node>
