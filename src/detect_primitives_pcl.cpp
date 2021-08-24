@@ -255,7 +255,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     object_pose.pose.pose.position.y = position[1];
     object_pose.pose.pose.position.z = position[2];
 
-    quaternion = Eigen::Quaternionf (pca.getEigenVectors ());
+    //quaternion = Eigen::Quaternionf (pca.getEigenVectors ());
 
     // Add rotation to object pose
     //tf::Quaternion quat = tf::Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
