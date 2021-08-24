@@ -15,7 +15,7 @@
   <depend>angles</depend>
   <depend>visualization_msgs</depend>
   <depend>object_recognition_msgs</depend>
-  <depend>opencv3</depend>
+  <depend>opencv</depend>
   <depend>cv_bridge</depend>
   <depend>pcl_ros</depend>
   
