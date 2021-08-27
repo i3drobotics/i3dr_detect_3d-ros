@@ -5,7 +5,7 @@
     <!-- enable/disable running rviz in launcher -->
     <arg name="rviz" default="true" />
     <arg name="camera_ns" default="i3dr_titania" />
-    <arg name="cad_filepath" default="$(find i3dr_detect_3d)/data/cad/can_ref.pcd" />
+    <arg name="cad_filepath" default="$(find i3dr_detect_3d)/data/cad/gripper_block_front.pcd" />
 
     <!-- Reduce point cloud size with VoxelGrid -->
     <!-- <node name="reduce_points" pkg="i3dr_detect_3d" type="reduce_points" output="screen" >
@@ -19,6 +19,8 @@
         <remap from="/points2" to="$(arg camera_ns)/points2" />
         <param name="cad_filepath" type="string" value="$(arg cad_filepath)" />
     </node>
+
+    <!-- rosrun pcl_ros pointcloud_to_pcd input:=i3dr_titania/points2 _binary:=true _prefix:=/home/i3dr/catkin_ws/src/i3dr_detect_3d-ros/data/in_ -->
 
     <!-- DISPLAY -->
     <!-- run rviz with config file -->

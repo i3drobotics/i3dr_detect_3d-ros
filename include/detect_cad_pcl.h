@@ -42,6 +42,10 @@
 #include <pcl/features/normal_3d.h>
 #include <pcl/features/shot_omp.h>
 #include <pcl/features/normal_3d_omp.h>
+#include <pcl/features/board.h>
+
+#include <pcl/recognition/cg/hough_3d.h>
+#include <pcl/recognition/cg/geometric_consistency.h>
 
 // #include <pcl/sample_consensus/method_types.h>
 // #include <pcl/sample_consensus/model_types.h>

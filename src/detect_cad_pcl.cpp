@@ -2,7 +2,7 @@
 
 typedef pcl::PointXYZRGB PointT;
 typedef pcl::Normal NormalT;
-typedef pcl::ReferenceFrame RefFrT;
+typedef pcl::ReferenceFrame RefFrameT;
 typedef pcl::SHOT352 DescriptorT;
 
 // define global ros publishers
@@ -17,6 +17,7 @@ ros::Publisher detection_object_pub_;
 ros::Publisher detection_marker_pub_;
 
 // define global variables
+std::string local_frame_id_ = "world"; //will update this based on the frame_id of the point cloud input
 pcl::PointCloud<PointT>::Ptr cad_model_points_;
 visualization_msgs::Marker detection_marker_;
 std::string recognized_objects_ns = "recognized_objects";
@@ -134,6 +135,9 @@ void init_detection(){
 
 void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
+    local_frame_id_ = cloud_msg->header.frame_id;
+    ROS_INFO("FrameID: %s", local_frame_id_.c_str());
+
     // Use correspondence grouping in PCL to detect location of model in scene
     // https://pcl.readthedocs.io/projects/tutorials/en/latest/correspondence_grouping.html#correspondence-grouping
 
@@ -145,7 +149,8 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     float rf_rad_ (0.015f);
     float descr_rad_ (0.02f);
     float cg_size_ (0.01f);
-    float cg_thresh_ (5.0f);
+    float cg_thresh_ (2.0f);
+    bool use_hough_ = true;
 
     pcl::PassThrough<PointT> pass;
     pcl::PointCloud<PointT>::Ptr cloud_passthrough_filtered (new pcl::PointCloud<PointT>);
@@ -167,7 +172,6 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pass.filter (*cloud_passthrough_filtered);
 
     ROS_INFO("Detecting object in %lu points: ", cloud_passthrough_filtered->points.size());
-    ROS_INFO("FrameID: %s", cloud_msg->header.frame_id.c_str());
 
     // get model from input cad
     pcl::copyPointCloud(*cad_model_points_, *model);
@@ -207,6 +211,105 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     descr_est.setInputNormals (scene_normals);
     descr_est.setSearchSurface (scene);
     descr_est.compute (*scene_descriptors);
+
+    // find model-scene correspondences with KdTree
+    pcl::CorrespondencesPtr model_scene_corrs (new pcl::Correspondences ());
+
+    pcl::KdTreeFLANN<DescriptorT> match_search;
+    match_search.setInputCloud (model_descriptors);
+
+    //  For each scene keypoint descriptor, find nearest neighbor into the model keypoints descriptor cloud and add it to the correspondences vector.
+    for (std::size_t i = 0; i < scene_descriptors->size (); ++i)
+    {
+        std::vector<int> neigh_indices (1);
+        std::vector<float> neigh_sqr_dists (1);
+        if (!std::isfinite (scene_descriptors->at (i).descriptor[0])) //skipping NaNs
+        {
+        continue;
+        }
+        int found_neighs = match_search.nearestKSearch (scene_descriptors->at (i), 1, neigh_indices, neigh_sqr_dists);
+        if(found_neighs == 1 && neigh_sqr_dists[0] < 0.25f) //  add match only if the squared descriptor distance is less than 0.25 (SHOT descriptor distances are between 0 and 1 by design)
+        {
+        pcl::Correspondence corr (neigh_indices[0], static_cast<int> (i), neigh_sqr_dists[0]);
+        model_scene_corrs->push_back (corr);
+        }
+    }
+    std::cout << "Correspondences found: " << model_scene_corrs->size () << std::endl;
+
+    // actual clustering
+    std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > rototranslations;
+    std::vector<pcl::Correspondences> clustered_corrs;
+
+    //  using Hough3D
+    if (use_hough_)
+    {
+        // compute (Keypoints) Reference Frames only for Hough
+        pcl::PointCloud<RefFrameT>::Ptr model_rf (new pcl::PointCloud<RefFrameT> ());
+        pcl::PointCloud<RefFrameT>::Ptr scene_rf (new pcl::PointCloud<RefFrameT> ());
+
+        pcl::BOARDLocalReferenceFrameEstimation<PointT, NormalT, RefFrameT> rf_est;
+        rf_est.setFindHoles (true);
+        rf_est.setRadiusSearch (rf_rad_);
+
+        rf_est.setInputCloud (model_keypoints);
+        rf_est.setInputNormals (model_normals);
+        rf_est.setSearchSurface (model);
+        rf_est.compute (*model_rf);
+
+        rf_est.setInputCloud (scene_keypoints);
+        rf_est.setInputNormals (scene_normals);
+        rf_est.setSearchSurface (scene);
+        rf_est.compute (*scene_rf);
+
+        //  Clustering
+        pcl::Hough3DGrouping<PointT, PointT, RefFrameT, RefFrameT> clusterer;
+        clusterer.setHoughBinSize (cg_size_);
+        clusterer.setHoughThreshold (cg_thresh_);
+        clusterer.setUseInterpolation (true);
+        clusterer.setUseDistanceWeight (false);
+
+        clusterer.setInputCloud (model_keypoints);
+        clusterer.setInputRf (model_rf);
+        clusterer.setSceneCloud (scene_keypoints);
+        clusterer.setSceneRf (scene_rf);
+        clusterer.setModelSceneCorrespondences (model_scene_corrs);
+
+        //clusterer.cluster (clustered_corrs);
+        clusterer.recognize (rototranslations, clustered_corrs);
+    }
+    else // Using GeometricConsistency
+    {
+        pcl::GeometricConsistencyGrouping<PointT, PointT> gc_clusterer;
+        gc_clusterer.setGCSize (cg_size_);
+        gc_clusterer.setGCThreshold (cg_thresh_);
+
+        gc_clusterer.setInputCloud (model_keypoints);
+        gc_clusterer.setSceneCloud (scene_keypoints);
+        gc_clusterer.setModelSceneCorrespondences (model_scene_corrs);
+
+        //gc_clusterer.cluster (clustered_corrs);
+        gc_clusterer.recognize (rototranslations, clustered_corrs);
+    }
+
+    // output results
+    std::cout << "Model instances found: " << rototranslations.size () << std::endl;
+    for (std::size_t i = 0; i < rototranslations.size (); ++i)
+    {
+        std::cout << "\n    Instance " << i + 1 << ":" << std::endl;
+        std::cout << "        Correspondences belonging to this instance: " << clustered_corrs[i].size () << std::endl;
+
+        // Print the rotation matrix and translation vector
+        Eigen::Matrix3f rotation = rototranslations[i].block<3,3>(0, 0);
+        Eigen::Vector3f translation = rototranslations[i].block<3,1>(0, 3);
+
+        printf ("\n");
+        printf ("            | %6.3f %6.3f %6.3f | \n", rotation (0,0), rotation (0,1), rotation (0,2));
+        printf ("        R = | %6.3f %6.3f %6.3f | \n", rotation (1,0), rotation (1,1), rotation (1,2));
+        printf ("            | %6.3f %6.3f %6.3f | \n", rotation (2,0), rotation (2,1), rotation (2,2));
+        printf ("\n");
+        printf ("        t = < %0.3f, %0.3f, %0.3f >\n", translation (0), translation (1), translation (2));
+    }
+
 
 
    //publish_point_cloud(point_cloud_segment_pub_, icp_result, cloud_msg->header.frame_id);
@@ -316,12 +419,26 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (cad_model_points_->points.empty ()){
+        ROS_ERROR("No points found in cad point cloud");
+        return 1;
+    }
+
+    // transform loaded model to world zero
+    Eigen::Vector4f c;
+    Eigen::Affine3f trans = Eigen::Affine3f::Identity ();
+    pcl::PointCloud<PointT>::Ptr transed_ref (new pcl::PointCloud<PointT>);
+
+    pcl::compute3DCentroid<PointT> (*cad_model_points_, c);
+    trans.translation ().matrix () = Eigen::Vector3f (c[0], c[1], c[2]);
+    ROS_INFO("Input CAD centroid (%.3f,%.3f,%.3f)", c[0], c[1], c[2]);
+    //pcl::transformPointCloud<PointT> (*cad_model_points_, *transed_ref, trans.inverse());
+
     init_detection();
 
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
     point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
     point_cloud_plane_removed_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane_removed", 1);
-    point_cloud_in_cad_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_in_cad", 1);
     point_cloud_cad_ref_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_cad_ref", 1);
 
     detection_poses_pub_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped> ("pose", 1);
@@ -334,7 +451,7 @@ int main(int argc, char **argv)
     ros::Rate loop_rate(1);
 
     while(ros::ok()){
-        publish_point_cloud(point_cloud_in_cad_pub_, cad_model_points_, "world");
+        publish_point_cloud(point_cloud_cad_ref_pub_, cad_model_points_, local_frame_id_);
         ros::spinOnce();
         loop_rate.sleep(); 
     }
