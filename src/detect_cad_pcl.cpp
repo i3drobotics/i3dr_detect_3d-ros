@@ -149,7 +149,7 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     float rf_rad_ (0.015f);
     float descr_rad_ (0.02f);
     float cg_size_ (0.01f);
-    float cg_thresh_ (2.0f);
+    float cg_thresh_ (5.0f);
     bool use_hough_ = true;
 
     pcl::PassThrough<PointT> pass;
