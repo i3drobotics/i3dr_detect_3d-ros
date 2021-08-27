@@ -8,15 +8,15 @@
     <arg name="cad_filepath" default="$(find i3dr_detect_3d)/data/cad/can_ref.pcd" />
 
     <!-- Reduce point cloud size with VoxelGrid -->
-    <node name="reduce_points" pkg="i3dr_detect_3d" type="reduce_points" output="screen" >
-        <param name="grid_size" type="double" value="0.005" />
+    <!-- <node name="reduce_points" pkg="i3dr_detect_3d" type="reduce_points" output="screen" >
+        <param name="grid_size" type="double" value="0.05" />
         <remap from="/points2" to="$(arg camera_ns)/points2" /> 
         <remap from="/points2_reduced" to="$(arg camera_ns)/points2_reduced" />
-    </node>
+    </node> -->
 
     <!-- Detect cad in point cloud -->
     <node name="detect_cad" pkg="i3dr_detect_3d" type="detect_cad" output="screen" >
-        <remap from="/points2" to="$(arg titania_ns)/points2_reduced" />
+        <remap from="/points2" to="$(arg camera_ns)/points2" />
         <param name="cad_filepath" type="string" value="$(arg cad_filepath)" />
     </node>
 

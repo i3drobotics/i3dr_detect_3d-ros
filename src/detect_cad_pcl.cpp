@@ -1,6 +1,9 @@
 #include "detect_cad_pcl.h"
 
 typedef pcl::PointXYZRGB PointT;
+typedef pcl::Normal NormalT;
+typedef pcl::ReferenceFrame RefFrT;
+typedef pcl::SHOT352 DescriptorT;
 
 // define global ros publishers
 ros::Publisher point_cloud_pub_;
@@ -14,11 +17,41 @@ ros::Publisher detection_object_pub_;
 ros::Publisher detection_marker_pub_;
 
 // define global variables
-pcl::PointCloud<PointT>::Ptr in_cad_points_;
-pcl::PointCloud<PointT>::Ptr cad_detect_points_;
+pcl::PointCloud<PointT>::Ptr cad_model_points_;
 visualization_msgs::Marker detection_marker_;
 std::string recognized_objects_ns = "recognized_objects";
-pcl::IterativeClosestPoint<PointT, PointT> icp_;
+// pcl::IterativeClosestPoint<PointT, PointT> icp_;
+
+double computeCloudResolution (const pcl::PointCloud<PointT>::ConstPtr &cloud)
+{
+  double res = 0.0;
+  int n_points = 0;
+  int nres;
+  std::vector<int> indices (2);
+  std::vector<float> sqr_distances (2);
+  pcl::search::KdTree<PointT> tree;
+  tree.setInputCloud (cloud);
+
+  for (std::size_t i = 0; i < cloud->size (); ++i)
+  {
+    if (! std::isfinite ((*cloud)[i].x))
+    {
+      continue;
+    }
+    //Considering the second neighbor since the first is the point itself.
+    nres = tree.nearestKSearch (i, 2, indices, sqr_distances);
+    if (nres == 2)
+    {
+      res += sqrt (sqr_distances[1]);
+      ++n_points;
+    }
+  }
+  if (n_points != 0)
+  {
+    res /= n_points;
+  }
+  return res;
+}
 
 tf::Vector3 poseToVector(const geometry_msgs::Pose& pose) {
 	const float px = static_cast<float>(pose.position.x);
@@ -45,7 +78,7 @@ void publish_point_cloud(ros::Publisher pub, pcl::PointCloud<PointT>::Ptr cloud,
 
 void load_stl_file(std::string filepath){
     pcl::PolygonMesh mesh;
-    in_cad_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
+    cad_model_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
 
     // load mesh from stl file
     if (pcl::io::loadPolygonFileSTL(filepath, mesh) == 0)
@@ -54,36 +87,36 @@ void load_stl_file(std::string filepath){
     }
 
     // Extract cloud from mesh
-    pcl::fromPCLPointCloud2(mesh.cloud, *in_cad_points_);
+    pcl::fromPCLPointCloud2(mesh.cloud, *cad_model_points_);
 }
 
 void load_ply_file(std::string filepath){
-    in_cad_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
+    cad_model_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
 
     // Load point cloud from PLY file
     pcl::PLYReader reader;
     ROS_INFO("Reading point cloud: %s", filepath.c_str());
-    reader.read(filepath, *in_cad_points_);
+    reader.read(filepath, *cad_model_points_);
     // Set time to now in headers
-    pcl_conversions::toPCL(ros::Time::now(), in_cad_points_->header.stamp);
+    pcl_conversions::toPCL(ros::Time::now(), cad_model_points_->header.stamp);
     // Display loaded point cloud size
     ROS_INFO("point cloud loaded.");
-    int point_cloud_size = in_cad_points_->width;
+    int point_cloud_size = cad_model_points_->width;
     ROS_INFO("%d",point_cloud_size);
 }
 
 void load_pcd_file(std::string filepath){
-    in_cad_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
+    cad_model_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
 
     // Load point cloud from PCD file
     pcl::PCDReader reader;
     ROS_INFO("Reading point cloud: %s", filepath.c_str());
-    reader.read(filepath, *in_cad_points_);
+    reader.read(filepath, *cad_model_points_);
     // Set time to now in headers
-    pcl_conversions::toPCL(ros::Time::now(), in_cad_points_->header.stamp);
+    pcl_conversions::toPCL(ros::Time::now(), cad_model_points_->header.stamp);
     // Display loaded point cloud size
     ROS_INFO("point cloud loaded.");
-    int point_cloud_size = in_cad_points_->width;
+    int point_cloud_size = cad_model_points_->width;
     ROS_INFO("%d",point_cloud_size);
 }
 
@@ -95,64 +128,37 @@ void gridSampleApprox (const pcl::PointCloud<PointT>::Ptr &cloud, pcl::PointClou
   grid.filter (result);
 }
 
-void init_cad_model(){
-    if (in_cad_points_->points.empty ()){
-        ROS_ERROR("No points found in cad point cloud");
-        return;
-    }
-
-    //prepare the model of tracker's target
-    double downsampling_grid_size = 0.01;
-    Eigen::Vector4f c;
-    Eigen::Affine3f trans = Eigen::Affine3f::Identity ();
-    pcl::PointCloud<PointT>::Ptr transed_ref (new pcl::PointCloud<PointT>);
-    cad_detect_points_ = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>());
-
-    pcl::compute3DCentroid<PointT> (*in_cad_points_, c);
-    trans.translation ().matrix () = Eigen::Vector3f (c[0], c[1], c[2]);
-    pcl::transformPointCloud<PointT> (*in_cad_points_, *transed_ref, trans.inverse());
-    gridSampleApprox(transed_ref, *cad_detect_points_, downsampling_grid_size);
-
-    if (cad_detect_points_->points.empty ()){
-        ROS_ERROR("No points found in sampled cad point cloud");
-        return;
-    }
-}
-
-void init_icp(){
-    icp_ = pcl::IterativeClosestPoint<PointT, PointT> ();
-    icp_.setMaximumIterations (200);
-    //icp_.setRANSACOutlierRejectionThreshold(0.03);
-    icp_.setMaxCorrespondenceDistance(0.5);
-    //icp_.setTransformationEpsilon(0.01);
-    //icp_.setEuclideanFitnessEpsilon(0.1);
-    icp_.setInputSource(cad_detect_points_);
+void init_detection(){
+    
 }
 
 void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
+    // Use correspondence grouping in PCL to detect location of model in scene
+    // https://pcl.readthedocs.io/projects/tutorials/en/latest/correspondence_grouping.html#correspondence-grouping
+
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);    //Point cloud from ROS msg
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
-    pcl::PassThrough<PointT> pass;
-    pcl::NormalEstimation<PointT, pcl::Normal> ne;
-    pcl::SACSegmentationFromNormals<PointT, pcl::Normal> seg; 
-    pcl::PLYWriter writer;
-    pcl::ExtractIndices<PointT> extract;
-    pcl::ExtractIndices<pcl::Normal> extract_normals;
-    pcl::search::KdTree<PointT>::Ptr tree (new pcl::search::KdTree<PointT> ());
+    float model_ss_ (0.01f);
+    float scene_ss_ (0.03f);
+    float rf_rad_ (0.015f);
+    float descr_rad_ (0.02f);
+    float cg_size_ (0.01f);
+    float cg_thresh_ (5.0f);
 
-    // Create point cloud objects
-    pcl::PointCloud<PointT>::Ptr cloud_voxel_filtered (new pcl::PointCloud<PointT>);
+    pcl::PassThrough<PointT> pass;
     pcl::PointCloud<PointT>::Ptr cloud_passthrough_filtered (new pcl::PointCloud<PointT>);
-    pcl::PointCloud<pcl::Normal>::Ptr cloud_normals (new pcl::PointCloud<pcl::Normal>);
-    pcl::PointCloud<PointT>::Ptr cloud_inlier_filtered (new pcl::PointCloud<PointT>);
-    pcl::PointCloud<PointT>::Ptr cloud_outlier_filtered (new pcl::PointCloud<PointT>);
-    pcl::PointCloud<pcl::Normal>::Ptr cloud_normals2 (new pcl::PointCloud<pcl::Normal>);
-    pcl::ModelCoefficients::Ptr plane_coefficients (new pcl::ModelCoefficients);
-    pcl::ModelCoefficients::Ptr seg_coefficients (new pcl::ModelCoefficients);
-    pcl::PointIndices::Ptr plane_inliers (new pcl::PointIndices);
-    pcl::PointIndices::Ptr seg_inliers (new pcl::PointIndices);
+
+    pcl::PointCloud<PointT>::Ptr model (new pcl::PointCloud<PointT> ());
+    pcl::PointCloud<PointT>::Ptr model_keypoints (new pcl::PointCloud<PointT> ());
+    pcl::PointCloud<PointT>::Ptr scene (new pcl::PointCloud<PointT> ());
+    pcl::PointCloud<PointT>::Ptr scene_keypoints (new pcl::PointCloud<PointT> ());
+    pcl::PointCloud<NormalT>::Ptr model_normals (new pcl::PointCloud<NormalT> ());
+    pcl::PointCloud<NormalT>::Ptr scene_normals (new pcl::PointCloud<NormalT> ());
+    pcl::PointCloud<DescriptorT>::Ptr model_descriptors (new pcl::PointCloud<DescriptorT> ());
+    pcl::PointCloud<DescriptorT>::Ptr scene_descriptors (new pcl::PointCloud<DescriptorT> ());
+
 
     // Build a passthrough filter to remove spurious NaNs and scene background
     pass.setInputCloud (cloud);
@@ -160,90 +166,54 @@ void pointcloud_detect_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_ms
     pass.setFilterLimits (0, 2.0);
     pass.filter (*cloud_passthrough_filtered);
 
-    if (cloud_passthrough_filtered->points.size () > 100000){
-        ROS_ERROR("Point cloud too large (%lu points). Conside increasing voxel grid size.",cloud_passthrough_filtered->points.size ());
-        return;
-    }
-
     ROS_INFO("Detecting object in %lu points: ", cloud_passthrough_filtered->points.size());
     ROS_INFO("FrameID: %s", cloud_msg->header.frame_id.c_str());
 
-    // Estimate point normals
-    ne.setSearchMethod (tree);
-    ne.setInputCloud (cloud_passthrough_filtered);
-    ne.setKSearch (50);
-    ne.compute (*cloud_normals);
+    // get model from input cad
+    pcl::copyPointCloud(*cad_model_points_, *model);
+    // get scene from camera 3D
+    pcl::copyPointCloud(*cloud_passthrough_filtered, *scene);
 
-    // Create the segmentation object for the planar model and set all the parameters
-    seg.setOptimizeCoefficients (true);
-    seg.setModelType (pcl::SACMODEL_NORMAL_PLANE);
-    seg.setNormalDistanceWeight (0.1);
-    seg.setMethodType (pcl::SAC_RANSAC);
-    seg.setMaxIterations (100);
-    seg.setDistanceThreshold (0.03);
-    seg.setInputCloud (cloud_passthrough_filtered);
-    seg.setInputNormals (cloud_normals);
-    // Obtain the plane inliers and coefficients
-    seg.segment (*plane_inliers, *plane_coefficients);
+    // normalise points
+    pcl::NormalEstimationOMP<PointT, NormalT> norm_est;
+    norm_est.setKSearch (10);
+    norm_est.setInputCloud (model);
+    norm_est.compute (*model_normals);
+    norm_est.setInputCloud (scene);
+    norm_est.compute (*scene_normals);
 
-    if (plane_inliers->indices.size () == 0)
-    {
-        ROS_ERROR("No plane inliers found");
-        return;
-    }
+    // downsample clouds to extract keypoints
+    pcl::UniformSampling<PointT> uniform_sampling;
+    uniform_sampling.setInputCloud (model);
+    uniform_sampling.setRadiusSearch (model_ss_);
+    uniform_sampling.filter (*model_keypoints);
+    std::cout << "Model total points: " << model->size () << "; Selected Keypoints: " << model_keypoints->size () << std::endl;
 
-    // Extract the planar inliers from the input cloud
-    extract.setInputCloud (cloud_passthrough_filtered);
-    extract.setIndices (plane_inliers);
-    extract.setNegative (false);
-    pcl::PointCloud<PointT>::Ptr cloud_plane (new pcl::PointCloud<PointT> ());
-    extract.filter (*cloud_plane);
-    if (cloud_plane->points.empty ()){
-        ROS_ERROR("Plane object is empty");
-        return;
-    } else {
-        publish_point_cloud(point_cloud_plane_pub_, cloud_plane, cloud_msg->header.frame_id);
-    }
+    uniform_sampling.setInputCloud (scene);
+    uniform_sampling.setRadiusSearch (scene_ss_);
+    uniform_sampling.filter (*scene_keypoints);
+    std::cout << "Scene total points: " << scene->size () << "; Selected Keypoints: " << scene_keypoints->size () << std::endl;
 
-    // Remove the planar inliers, extract the rest
-    extract.setNegative (true);
-    extract.filter (*cloud_inlier_filtered);
+    // compute descriptor for keypoints
+    pcl::SHOTEstimationOMP<PointT, NormalT, DescriptorT> descr_est;
+    descr_est.setRadiusSearch (descr_rad_);
 
-    // Create the filtering object
-    pcl::StatisticalOutlierRemoval<PointT> sor;
-    sor.setInputCloud (cloud_inlier_filtered);
-    sor.setMeanK (50);
-    sor.setStddevMulThresh (0.2);
-    sor.filter (*cloud_outlier_filtered);
+    descr_est.setInputCloud (model_keypoints);
+    descr_est.setInputNormals (model_normals);
+    descr_est.setSearchSurface (model);
+    descr_est.compute (*model_descriptors);
 
-    if (cloud_outlier_filtered->points.empty ()){
-        ROS_ERROR("Plane removed object is empty");
-        return;
-    } else {
-        publish_point_cloud(point_cloud_plane_removed_pub_, cloud_outlier_filtered, cloud_msg->header.frame_id);
-    }
+    descr_est.setInputCloud (scene_keypoints);
+    descr_est.setInputNormals (scene_normals);
+    descr_est.setSearchSurface (scene);
+    descr_est.compute (*scene_descriptors);
 
-    // TODO detect CAD object in point cloud
-    icp_.setInputTarget(cloud_inlier_filtered);
-    pcl::PointCloud<PointT>::Ptr icp_result (new pcl::PointCloud<PointT> ());
-    icp_.align(*icp_result);
 
-    if (icp_.hasConverged ())
-    {
-        std::cout << "ICP score: " << icp_.getFitnessScore() << std::endl;
-
-        // publish the icp result
-        if (icp_result->points.empty ()){
-            ROS_ERROR("ICP result is empty");
-            return;
-        } else {
-            //icp_.setInputSource(icp_result);
-            publish_point_cloud(point_cloud_segment_pub_, icp_result, cloud_msg->header.frame_id);
-        }
-    }
-
+   //publish_point_cloud(point_cloud_segment_pub_, icp_result, cloud_msg->header.frame_id);
     
-
+    
+    
+    
     // // TODO Extract position and rotation from localisation
     // float position[3];
     // float rotation[4];
@@ -346,8 +316,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    init_cad_model();
-    init_icp();
+    init_detection();
 
     point_cloud_segment_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_segment", 1);
     point_cloud_plane_pub_ = nh.advertise<sensor_msgs::PointCloud2>("points2_plane", 1);
@@ -365,8 +334,7 @@ int main(int argc, char **argv)
     ros::Rate loop_rate(1);
 
     while(ros::ok()){
-        publish_point_cloud(point_cloud_in_cad_pub_, in_cad_points_, "world");
-        publish_point_cloud(point_cloud_cad_ref_pub_, cad_detect_points_, "world");
+        publish_point_cloud(point_cloud_in_cad_pub_, cad_model_points_, "world");
         ros::spinOnce();
         loop_rate.sleep(); 
     }
